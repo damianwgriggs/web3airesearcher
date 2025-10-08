@@ -1,1 +1,261 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Research Assistant dApp</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        /* Ensure the iframe scales nicely */
+        #analyzerFrameContainer {
+            position: relative;
+            width: 100%;
+            /* TALLER ASPECT RATIO (4:3) for a decent size on all screens */
+            padding-top: 75%; /* 3 / 4 = 0.75 or 75% */
+        }
+        @media (min-width: 1024px) {
+            #analyzerFrameContainer {
+                /* Keeping 4:3 aspect ratio for wider screens as well for maximum vertical space */
+                padding-top: 75%; 
+            }
+        }
+        #analyzerFrame {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-6xl mx-auto bg-gray-800 rounded-2xl shadow-lg p-8 border border-gray-700 transition-all duration-500">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-cyan-400">AI Research Assistant</h1>
+            <p id="subHeaderText" class="text-gray-400 mt-2">Pay a one-time fee of 0.001 AVAX to unlock the research tool for this session.</p>
+        </div>
+
+        <div id="paymentView">
+            <div id="connectView" class="text-center">
+                 <button id="connectButton" class="w-full max-w-xs mx-auto bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105">
+                     Connect Wallet
+                 </button>
+            </div>
+            <div id="payView" class="hidden text-center">
+                <p class="text-sm text-gray-500 mb-2">Connected: <span id="accountAddress" class="font-mono text-cyan-300"></span></p>
+                <button id="payButton" class="w-full max-w-xs mx-auto bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 disabled:bg-gray-600 disabled:cursor-not-allowed disabled:transform-none">
+                    Pay 0.001 AVAX to Unlock
+                </button>
+            </div>
+        </div>
+
+        <div id="analyzerView" class="hidden">
+            <div id="analyzerFrameContainer" class="bg-gray-900 rounded-lg overflow-hidden border border-gray-700">
+                <iframe
+                    id="analyzerFrame"
+                    /* --- UPDATED EMBED SRC --- */
+                    src="https://damianwgriggs-airesearchassistant.hf.space"
+                    frameborder="0"
+                ></iframe>
+            </div>
+        </div>
+        
+        <div id="statusMessage" class="mt-6 text-center text-sm min-h-[20px]"></div>
+
+    </div>
+
+    <script>
+        // --- Configuration ---
+        // Your public wallet address to receive payments.
+        const recipientAddress = "0x43CAF8c948235Ed5e08608D5A7642910E3f82Fb9"; 
+        const fujiChainId = '0xa869';
+        const serviceCostHex = '0x38D7EA4C68000'; // 0.001 AVAX in hex
+
+        // --- DOM Elements ---
+        const connectButton = document.getElementById('connectButton');
+        const payButton = document.getElementById('payButton');
+        const connectView = document.getElementById('connectView');
+        const payView = document.getElementById('payView');
+        const paymentView = document.getElementById('paymentView');
+        const analyzerView = document.getElementById('analyzerView');
+        const accountAddressEl = document.getElementById('accountAddress');
+        const statusMessage = document.getElementById('statusMessage');
+        const subHeaderText = document.getElementById('subHeaderText');
+        
+        let currentAccount = null;
+
+        // --- Event Listeners ---
+        connectButton.addEventListener('click', connectWallet);
+        payButton.addEventListener('click', makePayment);
+
+        // --- Core Functions (Unchanged) ---
+
+        async function connectWallet() {
+            if (typeof window.ethereum === 'undefined') {
+                return updateStatus('MetaMask is not installed. Please install it.', true);
+            }
+            try {
+                updateStatus('Connecting wallet...', false);
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                handleAccountsChanged(accounts);
+                await checkAndSwitchNetwork();
+            } catch (error) {
+                updateStatus(`Connection failed: ${error.message}`, true);
+            }
+        }
+        
+        function handleAccountsChanged(accounts) {
+            if (accounts.length === 0) {
+                currentAccount = null;
+                showView('connect');
+            } else if (accounts[0] !== currentAccount) {
+                currentAccount = accounts[0];
+                const addr = currentAccount;
+                accountAddressEl.textContent = `${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`;
+                showView('pay');
+                updateStatus('Wallet connected. Ready to unlock.', false);
+            }
+        }
+        
+        if (typeof window.ethereum !== 'undefined') {
+            window.ethereum.on('accountsChanged', handleAccountsChanged);
+        }
+
+        async function checkAndSwitchNetwork() {
+            const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+            if (chainId !== fujiChainId) {
+                updateStatus('Please switch to Fuji Testnet.', true);
+                try {
+                    await window.ethereum.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: fujiChainId }],
+                    });
+                } catch (switchError) {
+                    updateStatus(`Failed to switch network.`, true);
+                }
+            }
+        }
+        
+        async function makePayment() {
+            if (!currentAccount) return updateStatus('Please connect wallet first.', true);
+            
+            setLoadingState(true);
+
+            try {
+                // --- CONTRACT-LESS TRANSACTION ---
+                // This is the simplest possible transaction: a direct value transfer.
+                // It has no `data` field and cannot be reverted by a contract.
+                const txParams = {
+                    from: currentAccount,
+                    to: recipientAddress,
+                    value: serviceCostHex,
+                };
+
+                updateStatus('Please confirm transaction in MetaMask...', false);
+                const txHash = await window.ethereum.request({
+                    method: 'eth_sendTransaction',
+                    params: [txParams],
+                });
+
+                updateStatus(`Transaction sent. Waiting for confirmation... <a href="https://testnet.snowtrace.io/tx/${txHash}" target="_blank" class="text-cyan-400 underline">View</a>`, false);
+                
+                const receipt = await waitForTransaction(txHash);
+
+                if (receipt.status === '0x1') {
+                    // SUCCESS!
+                    updateStatus('Payment confirmed! Access granted.', false, 3000);
+                    sessionStorage.setItem('isUnlocked', 'true');
+                    showAnalyzer();
+                } else {
+                    updateStatus(`Transaction failed. <a href="https://testnet.snowtrace.io/tx/${txHash}" target="_blank" class="text-cyan-400 underline">Details</a>`, true);
+                }
+
+            } catch (error) {
+                if (error.code === 4001) {
+                    updateStatus('Transaction rejected by user.', true);
+                } else {
+                    updateStatus(`Error: ${error.message}`, true);
+                }
+            } finally {
+                setLoadingState(false);
+            }
+        }
+
+        function waitForTransaction(txHash) {
+            return new Promise((resolve, reject) => {
+                const interval = setInterval(async () => {
+                    try {
+                        const receipt = await window.ethereum.request({
+                            method: 'eth_getTransactionReceipt',
+                            params: [txHash],
+                        });
+                        if (receipt) {
+                            clearInterval(interval);
+                            resolve(receipt);
+                        }
+                    } catch (error) {
+                        console.error("Error fetching receipt:", error);
+                        clearInterval(interval);
+                        reject(error);
+                    }
+                }, 2000);
+            });
+        }
+
+        function showAnalyzer() {
+            paymentView.classList.add('hidden');
+            analyzerView.classList.remove('hidden');
+            subHeaderText.textContent = "Interact with the embedded AI Researcher below.";
+            statusMessage.innerHTML = '';
+        }
+
+        // --- Helper & UI Functions (Unchanged) ---
+
+        function showView(viewName) {
+            connectView.classList.toggle('hidden', viewName !== 'connect');
+            payView.classList.toggle('hidden', viewName !== 'pay');
+        }
+        
+        function updateStatus(message, isError, clearAfterMs) {
+            statusMessage.innerHTML = message;
+            statusMessage.className = `mt-6 text-center text-sm min-h-[20px] ${isError ? 'text-red-400' : 'text-gray-400'}`;
+            if (clearAfterMs) {
+                setTimeout(() => statusMessage.innerHTML = '', clearAfterMs);
+            }
+        }
+        
+        function setLoadingState(isLoading) {
+             payButton.disabled = isLoading;
+             if (isLoading) {
+                 payButton.innerHTML = `<svg class="animate-spin h-5 w-5 mr-3 inline-block" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Processing...`;
+             } else {
+                 payButton.textContent = 'Pay 0.001 AVAX to Unlock';
+             }
+        }
+
+        async function init() {
+            if (sessionStorage.getItem('isUnlocked') === 'true') {
+                showAnalyzer();
+            } else if (typeof window.ethereum !== 'undefined') {
+                try {
+                    const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                    if (accounts.length > 0) {
+                        handleAccountsChanged(accounts);
+                        await checkAndSwitchNetwork();
+                    }
+                } catch (e) {
+                    console.error("Could not fetch accounts on init:", e);
+                }
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
